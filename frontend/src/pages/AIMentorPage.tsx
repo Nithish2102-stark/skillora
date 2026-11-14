@@ -26,22 +26,11 @@ type MentorResponse = {
   recommendations: Recommendation[];
 };
 
-const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined) || "http://localhost:8000";
-
 function suggestedQuestions(hasSkills: boolean, hasCareerGoal: boolean) {
   const suggestions = ["What should I focus on in my learning next?", "Which courses would help me prepare for my goals?"];
   if (hasSkills) suggestions.unshift("Which of my saved skills should I improve first?");
   if (hasCareerGoal) suggestions.push("How can I make progress toward my target career?");
   return suggestions.slice(0, 3);
-}
-
-async function getCurrentAccessToken(forceRefresh = false) {
-  if (!supabase) return null;
-  let currentSession = (await supabase.auth.getSession()).data.session;
-  if (currentSession && (forceRefresh || (currentSession.expires_at && currentSession.expires_at * 1000 <= Date.now() + 30_000))) {
-    currentSession = (await supabase.auth.refreshSession()).data.session;
-  }
-  return currentSession?.access_token ?? null;
 }
 
 export function AIMentorPage() {
@@ -71,26 +60,20 @@ export function AIMentorPage() {
     const history = [...messages, userMessage].map(({ role, content }) => ({ role, content }));
     setMessages((current) => [...current, userMessage]);
     try {
-      const accessToken = await getCurrentAccessToken();
-      if (!accessToken) throw new Error("Your authenticated session is unavailable. Please sign in again.");
-      const requestOptions = {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
-        body: JSON.stringify({ message: trimmed, history: history.slice(-20) }),
-      };
-      let response = await fetch(`${apiBaseUrl}/api/mentor/chat`, requestOptions);
-      if (response.status === 401) {
-        const refreshedToken = await getCurrentAccessToken(true);
-        if (refreshedToken && refreshedToken !== accessToken) {
-          response = await fetch(`${apiBaseUrl}/api/mentor/chat`, {
-            ...requestOptions,
-            headers: { "Content-Type": "application/json", Authorization: `Bearer ${refreshedToken}` },
-          });
-        }
+      const { data, error: functionError } = await supabase.functions.invoke<MentorResponse>("ai-mentor", {
+        body: { message: trimmed, history: history.slice(-20) },
+      });
+      if (functionError) {
+        throw new Error(
+          functionError.message.includes("404") || functionError.message.toLowerCase().includes("not found")
+            ? "AI Mentor is not configured yet. Deploy the optional Supabase Edge Function to enable Gemini guidance."
+            : functionError.message || "AI Mentor is temporarily unavailable.",
+        );
       }
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(payload?.detail || "AI Mentor is temporarily unavailable.");
-      const result = payload as MentorResponse;
+      if (!data?.message || !Array.isArray(data.recommendations)) {
+        throw new Error("AI Mentor returned an invalid response. Please try again.");
+      }
+      const result = data;
       setMessages((current) => [...current, { role: "assistant", content: result.message, recommendations: result.recommendations }]);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "AI Mentor is temporarily unavailable.");

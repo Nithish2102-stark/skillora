@@ -2,76 +2,76 @@
 
 AI-powered personalized learning and career intelligence platform.
 
-## Phase 1 structure
+## Stack
 
-- `frontend/` - React, TypeScript, Vite, Tailwind CSS, and client-side routing
-- `backend/` - FastAPI application and Python project configuration
+- React, TypeScript, Vite, and Tailwind CSS
+- Supabase Auth, PostgreSQL, and Row Level Security
+- Optional Supabase Edge Function for the AI Mentor
+
+The application is frontend-only. The browser uses the Supabase publishable
+(anon) key for authenticated data access, and Supabase RLS remains the security
+boundary for learner-owned records.
 
 ## Local development
-
-### Frontend
 
 ```bash
 cd frontend
 npm install
+cp .env.example .env
 npm run dev
 ```
 
-### Backend
-
-```bash
-cd backend
-python3 -m venv .venv
-.venv/bin/pip install -e .
-.venv/bin/uvicorn app.main:app --reload
-```
-
-Copy the environment templates before starting either application:
-
-```bash
-cp frontend/.env.example frontend/.env
-cp backend/.env.example backend/.env
-```
-
-## Phase 3 Supabase setup
-
-1. Create a Supabase project and copy its project URL and public anon key into
-   `frontend/.env` as `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`.
-2. Copy the URL, anon key, JWT issuer, and JWKS URL into `backend/.env`.
-3. Apply `supabase/migrations/20261114120000_skillora_initial_schema.sql` in
-   the Supabase SQL editor or with the Supabase CLI.
-4. Configure Supabase Auth email settings and the redirect URL
-   `http://localhost:5173/reset-password`.
-
-The application remains in local preview mode when the frontend Supabase
-variables contain the example placeholders. Real authentication and protected
-routes activate only after valid Supabase configuration is supplied. The
-service-role key is intentionally not used by the frontend or ordinary API
-requests.
-
-## Phase 3 AI Mentor setup
-
-The AI Mentor calls Gemini only from the FastAPI backend. Add these values to
-`backend/.env` and never to frontend environment variables:
+Set these values in `frontend/.env`:
 
 ```env
-GEMINI_API_KEY=your-gemini-api-key
-GEMINI_MODEL=gemini-2.0-flash
-MENTOR_RATE_LIMIT_PER_MINUTE=20
-MENTOR_REQUEST_TIMEOUT_SECONDS=20
+VITE_SUPABASE_URL=https://your-project.supabase.co
+VITE_SUPABASE_ANON_KEY=your-anon-key
 ```
 
-Keep `VITE_API_BASE_URL=http://localhost:8000` in `frontend/.env`, then start
-the applications in separate terminals:
+Apply the migrations in `supabase/migrations/` using the Supabase SQL editor or
+the Supabase CLI. Configure Supabase Auth email settings and add your local
+redirect URL, for example `http://localhost:5173/reset-password`.
+
+The service-role key and any AI provider key must never be added to frontend
+environment variables or browser code.
+
+## AI Mentor (optional)
+
+The AI Mentor page is available without an AI service, but chat responses
+require an Edge Function named `ai-mentor`. Deploy that function to Supabase
+and configure the Gemini API key as a server-side Edge Function secret. The
+frontend invokes the function with the authenticated Supabase session; Gemini
+credentials never reach the browser.
+
+From the repository root, deploy the prepared function and set its secrets:
 
 ```bash
-cd backend && .venv/bin/uvicorn app.main:app --reload
-cd frontend && npm run dev
+supabase functions deploy ai-mentor
+supabase secrets set GEMINI_API_KEY=your-gemini-api-key GEMINI_MODEL=gemini-2.0-flash
 ```
 
-The backend validates the Supabase bearer token and queries Supabase with that
-same user token, so learner-owned records remain protected by RLS. Automated
-backend tests mock Gemini and do not require a live API key. A live authenticated
-chat requires valid Supabase configuration, an authenticated session, and a
-Gemini API key; no live request is made by the test suite.
+If the function is not deployed, the rest of the application remains usable
+and AI Mentor displays a configuration message.
 
+## Vercel deployment
+
+Create a Vercel project connected to this repository with:
+
+- Root Directory: `frontend`
+- Framework Preset: `Vite`
+- Build Command: `npm run build`
+- Output Directory: `dist`
+
+The included `frontend/vercel.json` rewrite keeps client-side routes working
+when users open a route directly.
+
+Add the same `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` environment
+variables in Vercel for the appropriate deployment environments, then deploy.
+
+The production build can be verified locally with:
+
+```bash
+cd frontend
+npm install
+npm run build
+```
